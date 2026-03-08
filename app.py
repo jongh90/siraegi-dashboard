@@ -44,6 +44,15 @@ COLOR_EXPENSE = "#FF6B6B"   # 붉은색 — 지출
 # ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+/* Streamlit 기본 UI 숨기기 */
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+footer {visibility: hidden;}
+div[data-testid="stToolbar"] {visibility: hidden;}
+div[data-testid="stDecoration"] {visibility: hidden;}
+div[data-testid="stStatusWidget"] {visibility: hidden;}
+div[data-testid="stAppViewBlockContainer"] > div:first-child {padding-top: 1rem;}
+
 /* 카드 스타일 */
 .card {
     background: #ffffff;
@@ -241,8 +250,14 @@ def show_login():
     </div>""", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.4, 1])
     with c2:
-        st.link_button("🔑  Google 계정으로 로그인", build_auth_url(),
-                       use_container_width=True, type="primary")
+        auth_url = build_auth_url()
+        st.markdown(
+            f'<a href="{auth_url}" target="_self" style="'
+            f'display:block;width:100%;padding:10px 0;text-align:center;'
+            f'background:#3B5BDB;color:white;border-radius:8px;font-size:15px;'
+            f'font-weight:600;text-decoration:none;cursor:pointer;">'
+            f'🔑&nbsp;&nbsp;Google 계정으로 로그인</a>',
+            unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────
