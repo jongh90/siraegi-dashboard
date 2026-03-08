@@ -18,7 +18,7 @@ st.set_page_config(
     page_title="매출 대시보드",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ─────────────────────────────────────────────────────────────────
