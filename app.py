@@ -577,15 +577,16 @@ def show_dashboard():
             .sort_values("금액", ascending=False)
         )
 
+        total_exp_all  = exp_df["금액"].sum()             # 미분류 포함 전체 지출
+        total_cat      = cat_df["금액"].sum() if not cat_df.empty else 0
+        unclassified   = total_exp_all - total_cat        # 미분류 금액
+        classified_pct = total_cat / total_exp_all * 100 if total_exp_all > 0 else 0
+
         if cat_df.empty:
             st.markdown('<div style="color:#adb5bd;padding:20px;">분류된 지출 항목이 없습니다.</div>',
                         unsafe_allow_html=True)
         else:
-            total_exp_all = exp_df["금액"].sum()          # 미분류 포함 전체 지출
-            total_cat     = cat_df["금액"].sum()          # 분류된 항목 합계
-            max_amt       = cat_df["금액"].max()          # 막대 길이 기준
-            unclassified  = total_exp_all - total_cat     # 미분류 금액
-            classified_pct = total_cat / total_exp_all * 100 if total_exp_all > 0 else 0
+            max_amt = cat_df["금액"].max()                # 막대 길이 기준
 
             # ── 좌우 2분할 ────────────────────────────────────────
             left_col, divider_col, right_col = st.columns([9, 0.05, 9])
@@ -639,54 +640,6 @@ def show_dashboard():
                             f'<div style="text-align:right;font-size:14px;font-weight:600;color:#495057;'
                             f'padding-top:5px;">{pct:.1f}%</div>',
                             unsafe_allow_html=True)
-
-                # 미분류 안내 문구 (미분류가 있을 때만)
-                if unclassified > 0:
-                    unclassified_pct = unclassified / total_exp_all * 100
-                    unclassified_df = exp_df[exp_df["대분류"].isin(["미분류", ""])]
-                    unclassified_cnt = len(unclassified_df)
-
-                    APPSHEET_URL = (
-                        "https://www.appsheet.com/start/db3ff1ca-3211-4360-8a02-71747026973b"
-                        "?platform=desktop#appName=%EC%8B%9C%EB%9E%98%EA%B8%B0%EB%B0%A5%EC%83%81-659360179"
-                        "&vss=H4sIAAAAAAAAA6WOsQ3CMBREd7naE7hFFAhBA6LBFCb-kSwSO4odILIsMQg9GzBVhsAmIOqI8r-vd3cBZ02XjZfFCXwffteSenAEgW3fkAAXmFnjW1sJMIG1rEc4PG7D8y4QEQ_sa3ty4GGKzP9pZtCKjNelpjYnZS8lfKz0zk4Co4HIUHdeHit6T01GjImVtugcqV2aMbneLcz82kijVlalwFJWjuIL3DphD1sBAAA="
-                        "&view=%EC%A7%80%EC%B6%9C"
-                    )
-
-                    ban1, ban2 = st.columns([7, 3])
-                    with ban1:
-                        st.markdown(
-                            f'<div style="margin-top:10px;margin-bottom:6px;padding:7px 12px;background:#fff9db;'
-                            f'border-radius:8px;border-left:3px solid #FCC419;">'
-                            f'<span style="font-size:12px;color:#856404;">⚠️ 미분류 </span>'
-                            f'<span style="font-size:12px;font-weight:600;color:#856404;">'
-                            f'₩{int(unclassified/10000):,}만 ({unclassified_pct:.1f}%)  '
-                            f'<span style="font-weight:400;">— {unclassified_cnt}건</span></span>'
-                            f'</div>',
-                            unsafe_allow_html=True)
-                    with ban2:
-                        st.link_button(
-                            "📝 AppSheet에서 분류하기 →",
-                            APPSHEET_URL,
-                            use_container_width=True,
-                        )
-
-                    # 미분류 항목 테이블
-                    with st.expander(f"미분류 항목 보기 ({unclassified_cnt}건)", expanded=False):
-                        show_cols = [c for c in ["거래날짜", "결제수단", "보냄", "금액", "내용"] if c in unclassified_df.columns]
-                        tbl = (
-                            unclassified_df[show_cols]
-                            .sort_values("금액", ascending=False)
-                            .reset_index(drop=True)
-                        )
-                        st.dataframe(
-                            tbl,
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "금액": st.column_config.NumberColumn("금액", format="₩%d"),
-                            },
-                        )
 
             # ── 구분선 ────────────────────────────────────────────
             with divider_col:
@@ -762,8 +715,56 @@ def show_dashboard():
                                     f'padding-top:6px;">{mpct:.1f}%</div>',
                                     unsafe_allow_html=True)
 
+        # ── 미분류 섹션 (전체 너비, 카드 하단) ──────────────────────
+        if unclassified > 0:
+            unclassified_pct = unclassified / total_exp_all * 100
+            unclassified_df = exp_df[exp_df["대분류"].isin(["미분류", ""])]
+            unclassified_cnt = len(unclassified_df)
 
+            APPSHEET_URL = (
+                "https://www.appsheet.com/start/db3ff1ca-3211-4360-8a02-71747026973b"
+                "?platform=desktop#appName=%EC%8B%9C%EB%9E%98%EA%B8%B0%EB%B0%A5%EC%83%81-659360179"
+                "&vss=H4sIAAAAAAAAA6WOsQ3CMBREd7naE7hFFAhBA6LBFCb-kSwSO4odILIsMQg9GzBVhsAmIOqI8r-vd3cBZ02XjZfFCXwffteSenAEgW3fkAAXmFnjW1sJMIG1rEc4PG7D8y4QEQ_sa3ty4GGKzP9pZtCKjNelpjYnZS8lfKz0zk4Co4HIUHdeHit6T01GjImVtugcqV2aMbneLcz82kijVlalwFJWjuIL3DphD1sBAAA="
+                "&view=%EC%A7%80%EC%B6%9C"
+            )
 
+            st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
+            st.markdown('<div style="border-top:1px solid #f1f3f5;margin-bottom:8px;"></div>', unsafe_allow_html=True)
+
+            ban1, ban2 = st.columns([7, 3])
+            with ban1:
+                st.markdown(
+                    f'<div style="margin-bottom:6px;padding:7px 12px;background:#fff9db;'
+                    f'border-radius:8px;border-left:3px solid #FCC419;">'
+                    f'<span style="font-size:12px;color:#856404;">⚠️ 미분류 </span>'
+                    f'<span style="font-size:12px;font-weight:600;color:#856404;">'
+                    f'₩{int(unclassified/10000):,}만 ({unclassified_pct:.1f}%)  '
+                    f'<span style="font-weight:400;">— {unclassified_cnt}건</span></span>'
+                    f'</div>',
+                    unsafe_allow_html=True)
+            with ban2:
+                st.link_button(
+                    "📝 AppSheet에서 분류하기 →",
+                    APPSHEET_URL,
+                    use_container_width=True,
+                )
+
+            # 미분류 항목 테이블
+            with st.expander(f"미분류 항목 보기 ({unclassified_cnt}건)", expanded=False):
+                show_cols = [c for c in ["거래날짜", "결제수단", "보냄", "금액", "내용"] if c in unclassified_df.columns]
+                tbl = (
+                    unclassified_df[show_cols]
+                    .sort_values("금액", ascending=False)
+                    .reset_index(drop=True)
+                )
+                st.dataframe(
+                    tbl,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "금액": st.column_config.NumberColumn("금액", format="₩%d"),
+                    },
+                )
 
 # ─────────────────────────────────────────────────────────────────
 # 진입점
