@@ -685,7 +685,7 @@ def show_dashboard():
                         for j, (_, mrow) in enumerate(mid_df.iterrows()):
                             mpct   = mrow["금액"] / total_mid * 100
                             mbar_w = mrow["금액"] / max_mid * 100
-                            mc_dot, mc_name, mc_bar, mc_amt, mc_pct = st.columns([0.3, 1.8, 5, 1.5, 0.8])
+                            mc_dot, mc_name, mc_bar, mc_amt, mc_pct = st.columns([0.3, 2.8, 3.5, 1.8, 0.8])
                             with mc_dot:
                                 st.markdown(
                                     f'<div style="width:10px;height:10px;background:{sel_color};'
