@@ -15,8 +15,8 @@ from datetime import datetime, timedelta, timezone
 # 페이지 설정
 # ─────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="매출 대시보드",
-    page_icon="📊",
+    page_title="시래기밥상 매출·지출 분석",
+    page_icon="🍲",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -52,6 +52,8 @@ div[data-testid="stToolbar"] {visibility: hidden;}
 div[data-testid="stDecoration"] {visibility: hidden;}
 div[data-testid="stStatusWidget"] {visibility: hidden;}
 div[data-testid="stAppViewBlockContainer"] > div:first-child {padding-top: 1rem;}
+/* 제목 anchor 링크 숨기기 */
+h1 a, h2 a, h3 a { display: none !important; }
 
 /* 카드 스타일 */
 .card {
@@ -97,6 +99,22 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
     box-shadow: 0 2px 12px rgba(0,0,0,0.07) !important;
     background: white !important;
     padding: 8px 4px !important;
+}
+/* 지출 분류 토글 버튼 — 테두리/배경 제거, 텍스트만 */
+button[data-testid="baseButton-secondary"][kind="secondary"] {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: #adb5bd !important;
+    font-size: 11px !important;
+    padding: 2px 4px !important;
+    min-height: unset !important;
+    height: auto !important;
+}
+button[data-testid="baseButton-secondary"][kind="secondary"]:hover {
+    background: #f1f3f5 !important;
+    border-radius: 4px !important;
+    color: #495057 !important;
 }
 /* 상단 두 카드 높이 동일하게 (flex stretch) */
 div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
@@ -311,10 +329,13 @@ def show_dashboard():
 
     year_options  = ["전체"] + [str(int(y)) for y in years]
 
-    # ── 헤더 + 필터 ───────────────────────────────────────────
-    h1, h2, h3, h4 = st.columns([4, 2, 2, 1.5])
+    # ── 헤더 + 필터 (1줄) ────────────────────────────────────
+    h1, h2, h3, h4 = st.columns([5, 1.5, 1.5, 1.5])
     with h1:
-        st.title("📊 매출 대시보드")
+        st.markdown(
+            '<span style="font-size:20px;font-weight:800;color:#212529;">'
+            '🍲 시래기밥상 매출·지출 분석</span>',
+            unsafe_allow_html=True)
     with h2:
         sel_year  = st.selectbox("연도", year_options,
                                  index=year_options.index(latest_year),
@@ -343,9 +364,8 @@ def show_dashboard():
         if st.button("🔄 새로고침", use_container_width=True):
             st.cache_data.clear(); st.rerun()
 
-    period = sel_year if sel_year != "전체" else "전체 기간"
-    if sel_month != "전체": period += f" {sel_month}"
-    st.caption(f"📅 {period}  |  기준: 회계날짜  |  업데이트: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    period_txt = sel_year if sel_year != "전체" else "전체 기간"
+    if sel_month != "전체": period_txt += f" {sel_month}"
     st.markdown("---")
 
     # ── 필터 적용 ─────────────────────────────────────────────
@@ -362,70 +382,139 @@ def show_dashboard():
     net       = total_rev - total_exp
     rate      = round(net / total_rev * 100, 1) if total_rev > 0 else 0.0
 
-    # ════════════════════════════════════════════════════════════
-    # 상단 카드: 도넛 + 월별 바차트
-    # ════════════════════════════════════════════════════════════
-    col_left, col_right = st.columns([4, 6])
+    # ── 전월 데이터 계산 ──────────────────────────────────────
+    if sel_month != "전체":
+        cur_m = int(sel_month.replace("월", ""))
+        cur_y = int(sel_year) if sel_year != "전체" else int(latest_year)
+        prev_dt = (datetime(cur_y, cur_m, 1) - timedelta(days=1))
+        prev_y, prev_m = prev_dt.year, prev_dt.month
+        prev_df  = df[(df["연도"] == prev_y) & (df["월"] == prev_m)]
+        prev_rev = prev_df[prev_df["유형"] == "매출"]["금액"].sum()
+        prev_exp = prev_df[prev_df["유형"] == "지출"]["금액"].sum()
+        prev_net = prev_rev - prev_exp
+        has_prev = len(prev_df) > 0
+    else:
+        has_prev = False
+        prev_rev = prev_exp = prev_net = 0
 
-    # ── 도넛 + KPI ────────────────────────────────────────────
-    with col_left:
-      with st.container(border=True):
-        ct1, ct2 = st.columns([1, 1])
-        with ct1:
-            period_label = f"{sel_month} " if sel_month != "전체" else ""
-            st.markdown(f'<span class="card-title">{period_label}수익 · 지출 CHART</span>', unsafe_allow_html=True)
-        with ct2:
-            st.markdown('<div style="text-align:right;color:#adb5bd;font-size:12px;padding-top:4px;">단위 : 원 (₩)</div>', unsafe_allow_html=True)
+    def delta_str(cur, prev):
+        """전월 대비 변화량 문자열 반환"""
+        if prev == 0:
+            return None
+        diff = cur - prev
+        pct  = diff / abs(prev) * 100
+        sign = "▲" if diff >= 0 else "▼"
+        color = "#2f9e44" if diff >= 0 else "#e03131"
+        return f'<span style="font-size:11px;color:{color};">{sign} {abs(int(diff/10000)):,}만 ({abs(pct):.1f}%)</span>'
 
-        # 도넛 차트
-        donut = go.Figure(go.Pie(
-            values=[total_rev, total_exp],
-            labels=["수익", "지출"],
-            hole=0.62,
-            marker_colors=[COLOR_REVENUE, COLOR_EXPENSE],
-            textinfo="none",
-            sort=False,
-            direction="clockwise",
-            hovertemplate="%{label}: ₩%{value:,.0f}<extra></extra>",
-        ))
-        donut.update_layout(
-            showlegend=False,
-            margin=dict(t=0, b=0, l=0, r=0),
-            height=160,
-            annotations=[dict(
-                text=f"<b>{rate}%</b>",
-                x=0.5, y=0.5, font_size=20,
-                showarrow=False, font_color="#212529"
-            )],
-        )
-        # KPI 왼쪽 + 도넛 오른쪽
-        k1, k2 = st.columns([1, 1])
-        with k1:
-            st.markdown(f"""
-            <div style="padding-top:12px; padding-bottom:35px;">
-                <div class="kpi-label">💰 순이익(수익-지출)</div>
-                <div class="kpi-profit">₩{net:,.0f}</div>
-                <div style="margin-top:14px;">
-                    <div style="font-size:12px;color:#868e96;">
-                        <span class="legend-dot-blue"></span>수익
-                    </div>
-                    <span class="kpi-revenue">₩{total_rev:,.0f}</span>
-                </div>
-                <div style="margin-top:10px;">
-                    <div style="font-size:12px;color:#868e96;">
-                        <span class="legend-dot-gray"></span>지출
-                    </div>
-                    <span class="kpi-expense">₩{total_exp:,.0f}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        with k2:
-            st.markdown('<div style="height:48px"></div>', unsafe_allow_html=True)
+    # ── 전월 대비 delta 계산 (KPI 렌더 전에 미리) ────────────
+    rev_delta = delta_str(total_rev, prev_rev) if has_prev else ""
+    exp_delta = delta_str(total_exp, prev_exp) if has_prev else ""
+    net_delta = delta_str(net, prev_net)       if has_prev else ""
+
+    _delta_label = '<span style="font-size:11px;color:#adb5bd;font-weight:400;">전월 대비</span>'
+    # 전월 대비 없을 때도 동일 높이 유지 (빈 div로 공간 확보)
+    _empty_delta = '<div style="height:20px;margin-top:8px;"></div>'
+    net_delta_html = (
+        f'<div style="margin-top:8px;height:20px;">{net_delta} {_delta_label}</div>'
+        if net_delta else _empty_delta
+    )
+    rev_delta_html = (
+        f'<div style="margin-top:8px;height:20px;">{rev_delta} {_delta_label}</div>'
+        if rev_delta else _empty_delta
+    )
+    exp_delta_html = (
+        f'<div style="margin-top:8px;height:20px;">{exp_delta} {_delta_label}</div>'
+        if exp_delta else _empty_delta
+    )
+
+    # ════════════════════════════════════════════════════════════
+    # 1행: KPI 3개 + 도넛 (4열)
+    # ════════════════════════════════════════════════════════════
+    net_color = "#3B5BDB" if net >= 0 else "#e03131"
+    net_bg    = "#eef2ff" if net >= 0 else "#fff5f5"
+
+    # 카드 높이 통일: 고정 min-height + 배경색 제거(숫자만 크게)
+    _kpi_label = 'style="font-size:11px;color:#adb5bd;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:10px;"'
+    _kpi_inner = 'style="padding:14px 4px 8px 4px;min-height:120px;"'
+
+    kpi1, kpi2, kpi3, kpi_donut = st.columns([3, 3, 3, 2])
+
+    with kpi1:
+        with st.container(border=True):
+            st.markdown(
+                f'<div {_kpi_inner}>'
+                f'<div {_kpi_label}>순이익</div>'
+                f'<div style="font-size:32px;font-weight:800;color:{net_color};line-height:1.1;">'
+                f'₩{int(net/10000):,}만</div>'
+                f'{net_delta_html}'
+                f'</div>',
+                unsafe_allow_html=True)
+
+    with kpi2:
+        with st.container(border=True):
+            st.markdown(
+                f'<div {_kpi_inner}>'
+                f'<div {_kpi_label}>매출</div>'
+                f'<div style="font-size:32px;font-weight:800;color:{COLOR_REVENUE};line-height:1.1;">'
+                f'₩{int(total_rev/10000):,}만</div>'
+                f'{rev_delta_html}'
+                f'</div>',
+                unsafe_allow_html=True)
+
+    with kpi3:
+        with st.container(border=True):
+            st.markdown(
+                f'<div {_kpi_inner}>'
+                f'<div {_kpi_label}>지출</div>'
+                f'<div style="font-size:32px;font-weight:800;color:{COLOR_EXPENSE};line-height:1.1;">'
+                f'₩{int(total_exp/10000):,}만</div>'
+                f'{exp_delta_html}'
+                f'</div>',
+                unsafe_allow_html=True)
+
+    # ── 도넛 차트 (KPI 행 오른쪽) ────────────────────────────
+    with kpi_donut:
+        with st.container(border=True):
+            donut = go.Figure(go.Pie(
+                values=[max(total_rev, 0), max(total_exp, 0)],
+                labels=["매출", "지출"],
+                hole=0.62,
+                marker_colors=[COLOR_REVENUE, COLOR_EXPENSE],
+                textinfo="none",
+                sort=False,
+                direction="clockwise",
+                hovertemplate="%{label}: ₩%{value:,.0f}<extra></extra>",
+            ))
+            donut.update_layout(
+                showlegend=False,
+                margin=dict(t=4, b=0, l=0, r=0),
+                height=130,
+                annotations=[dict(
+                    text=f"<b>{rate}%</b>",
+                    x=0.5, y=0.58, font_size=18,
+                    showarrow=False,
+                    font_color=net_color,
+                ), dict(
+                    text="수익률",
+                    x=0.5, y=0.38, font_size=10,
+                    showarrow=False,
+                    font_color="#adb5bd",
+                )],
+            )
             st.plotly_chart(donut, use_container_width=True, config={"displayModeBar": False})
+            st.markdown(
+                f'<div style="display:flex;justify-content:space-around;font-size:10px;'
+                f'color:#868e96;padding-bottom:6px;margin-top:-10px;">'
+                f'<span><span style="color:{COLOR_REVENUE};">●</span> {int(total_rev/10000):,}만</span>'
+                f'<span><span style="color:{COLOR_EXPENSE};">●</span> {int(total_exp/10000):,}만</span>'
+                f'</div>',
+                unsafe_allow_html=True)
 
-    # ── 월별 바차트 ────────────────────────────────────────────
-    with col_right:
-      with st.container(border=True):
+    # ════════════════════════════════════════════════════════════
+    # 2행: 월별 바차트 (전체 너비)
+    # ════════════════════════════════════════════════════════════
+    with st.container(border=True):
 
         # 선택 연도 기준 1~12월 전체 (월 필터 무시하고 연도 기준만 적용)
         year_df = df.copy()
@@ -537,6 +626,12 @@ def show_dashboard():
             hovertemplate="순이익: ₩%{y:,.0f}<extra></extra>",
         ))
 
+        # y축 단위: 전량 만원으로 통일
+        def fmt_yaxis(v):
+            if v == 0:
+                return "0"
+            return f"{int(v / 10_000):,}만"
+
         fig_bar.update_layout(
             barmode="group",
             height=290,
@@ -546,29 +641,29 @@ def show_dashboard():
             paper_bgcolor="white",
             xaxis=dict(showgrid=False),
             yaxis=dict(
-                showgrid=True, gridcolor="#f1f3f5", tickformat=",.0f",
+                showgrid=True, gridcolor="#f1f3f5",
+                tickformat=None,
+                tickvals=[i * 10_000_000 for i in range(-20, 21)],
+                ticktext=[fmt_yaxis(i * 10_000_000) for i in range(-20, 21)],
                 zeroline=True, zerolinecolor="#dee2e6", zerolinewidth=1.5,
+                autorange=True,
             ),
         )
         st.plotly_chart(fig_bar, use_container_width=True, config={"displayModeBar": False})
 
     # ════════════════════════════════════════════════════════════
-    # 하단 카드: 지출 드릴다운 (대분류 → 중분류)
+    # 하단: 지출 분류 (클릭 선택 → 우측 중분류 드릴다운)
     # ════════════════════════════════════════════════════════════
     DRILL_COLORS = [
         "#3B5BDB","#FF6B6B","#20C997","#FCC419","#845EF7",
         "#F76707","#1C7ED6","#E64980","#37B24D","#F03E3E",
     ]
 
-    if "drill_category" not in st.session_state:
-        st.session_state.drill_category = None
+    # 선택된 대분류 (단일 선택, 클릭 시 우측 드릴다운 표시)
+    if "selected_cat" not in st.session_state:
+        st.session_state.selected_cat = None
 
     with st.container(border=True):
-        # ── 헤더 ──────────────────────────────────────────────────
-        st.markdown('<span style="font-size:15px;font-weight:700;">지출 분류</span>',
-                    unsafe_allow_html=True)
-        st.markdown('<div style="height:6px"></div>', unsafe_allow_html=True)
-
         # ── 대분류 집계 ───────────────────────────────────────────
         cat_df = (
             exp_df[~exp_df["대분류"].isin(["미분류", ""])]
@@ -577,143 +672,150 @@ def show_dashboard():
             .sort_values("금액", ascending=False)
         )
 
-        total_exp_all  = exp_df["금액"].sum()             # 미분류 포함 전체 지출
+        total_exp_all  = exp_df["금액"].sum()
         total_cat      = cat_df["금액"].sum() if not cat_df.empty else 0
-        unclassified   = total_exp_all - total_cat        # 미분류 금액
+        unclassified   = total_exp_all - total_cat
         classified_pct = total_cat / total_exp_all * 100 if total_exp_all > 0 else 0
 
-        if cat_df.empty:
-            st.markdown('<div style="color:#adb5bd;padding:20px;">분류된 지출 항목이 없습니다.</div>',
-                        unsafe_allow_html=True)
-        else:
-            max_amt = cat_df["금액"].max()                # 막대 길이 기준
+        # ── 헤더 ──────────────────────────────────────────────────
+        th1, th2 = st.columns([6, 3])
+        with th1:
+            st.markdown(
+                '<span style="font-size:15px;font-weight:700;">지출 분류</span>'
+                '<span style="font-size:12px;color:#adb5bd;margin-left:8px;">'
+                '· 대분류 클릭 시 중분류 상세 표시</span>',
+                unsafe_allow_html=True)
+        with th2:
+            st.markdown(
+                f'<div style="text-align:right;font-size:12px;color:#adb5bd;padding-top:4px;">'
+                f'분류됨 <b style="color:#495057;">{classified_pct:.1f}%</b></div>',
+                unsafe_allow_html=True)
+        st.markdown('<div style="height:6px"></div>', unsafe_allow_html=True)
 
-            # ── 좌우 2분할 ────────────────────────────────────────
-            left_col, divider_col, right_col = st.columns([9, 0.05, 9])
+        # ── 좌(대분류 목록) : 구분선 : 우(중분류 드릴다운) ─────────
+        left_col, div_col, right_col = st.columns([5, 0.05, 5])
 
-            # ── 왼쪽: 대분류 ─────────────────────────────────────
-            with left_col:
-                hdr1, hdr2 = st.columns([5, 3])
-                with hdr1:
-                    st.markdown('<div style="font-size:12px;color:#adb5bd;">대분류 · 항목을 클릭하면 중분류 표시</div>',
-                                unsafe_allow_html=True)
-                with hdr2:
-                    st.markdown(
-                        f'<div style="text-align:right;font-size:12px;color:#adb5bd;">'
-                        f'분류됨 <b style="color:#495057;">{classified_pct:.1f}%</b></div>',
-                        unsafe_allow_html=True)
-                for i, (_, row) in enumerate(cat_df.iterrows()):
-                    pct      = row["금액"] / total_exp_all * 100   # 총 지출 기준
-                    bar_w    = row["금액"] / max_amt * 100
-                    color    = DRILL_COLORS[i % len(DRILL_COLORS)]
-                    selected = (st.session_state.drill_category == row["대분류"])
-
-                    c_dot, c_btn, c_bar, c_amt, c_pct = st.columns([0.3, 1.8, 5, 1.5, 0.8])
-                    with c_dot:
-                        st.markdown(
-                            f'<div style="width:12px;height:12px;background:{color};'
-                            f'border-radius:3px;margin-top:9px;"></div>',
+        # ── 왼쪽: 대분류 목록 ─────────────────────────────────────
+        with left_col:
+            if cat_df.empty:
+                st.markdown('<div style="color:#adb5bd;padding:20px;">분류된 지출 항목이 없습니다.</div>',
                             unsafe_allow_html=True)
-                    with c_btn:
-                        if st.button(row["대분류"], key=f"drill_{i}", use_container_width=True):
-                            st.session_state.drill_category = (
-                                None if selected else row["대분류"]
+            else:
+                max_amt = cat_df["금액"].max()
+                for i, (_, row) in enumerate(cat_df.iterrows()):
+                    is_sel = (row["대분류"] == st.session_state.selected_cat)
+                    pct    = row["금액"] / total_exp_all * 100
+                    bar_w  = row["금액"] / max_amt * 100
+                    color  = DRILL_COLORS[i % len(DRILL_COLORS)]
+                    fw     = "700" if is_sel else "500"
+                    bg     = f"background:linear-gradient(90deg,{color}14 0%,transparent 100%);border-radius:6px;" if is_sel else ""
+
+                    r_arrow, r_name, r_bar, r_amt, r_pct = st.columns([0.5, 2.4, 5, 1.8, 0.9])
+                    with r_arrow:
+                        if st.button("›", key=f"cat_{i}", help=f"{row['대분류']} 중분류 보기"):
+                            st.session_state.selected_cat = (
+                                None if is_sel else row["대분류"]
                             )
                             st.rerun()
-                    with c_bar:
-                        bar_color = color if not selected else color
-                        border    = f"box-shadow:0 0 0 2px {color};" if selected else ""
+                    with r_name:
+                        st.markdown(
+                            f'<div style="padding:4px 2px;{bg}">'
+                            f'<span style="display:inline-block;width:9px;height:9px;'
+                            f'background:{color};border-radius:50%;margin-right:7px;vertical-align:middle;"></span>'
+                            f'<span style="font-size:13px;font-weight:{fw};color:#212529;">'
+                            f'{row["대분류"]}</span></div>',
+                            unsafe_allow_html=True)
+                    with r_bar:
+                        border_s = f"box-shadow:0 0 0 1.5px {color};" if is_sel else ""
                         st.markdown(
                             f'<div style="padding-top:7px;">'
-                            f'<div style="background:#f1f3f5;border-radius:6px;height:18px;width:100%;{border}">'
-                            f'<div style="background:{color};border-radius:6px;height:18px;'
-                            f'width:{bar_w:.1f}%;"></div>'
-                            f'</div></div>',
+                            f'<div style="background:#f1f3f5;border-radius:6px;height:14px;{border_s}">'
+                            f'<div style="background:{color};border-radius:6px;height:14px;'
+                            f'width:{bar_w:.1f}%;"></div></div></div>',
                             unsafe_allow_html=True)
-                    with c_amt:
+                    with r_amt:
                         st.markdown(
                             f'<div style="text-align:right;font-size:13px;font-weight:600;'
-                            f'padding-top:6px;">₩{int(row["금액"]/10000):,}만</div>',
+                            f'padding-top:5px;">₩{int(row["금액"]/10000):,}만</div>',
                             unsafe_allow_html=True)
-                    with c_pct:
+                    with r_pct:
                         st.markdown(
-                            f'<div style="text-align:right;font-size:14px;font-weight:600;color:#495057;'
-                            f'padding-top:5px;">{pct:.1f}%</div>',
+                            f'<div style="text-align:right;font-size:13px;font-weight:700;'
+                            f'color:#495057;padding-top:5px;">{pct:.1f}%</div>',
                             unsafe_allow_html=True)
 
-            # ── 구분선 ────────────────────────────────────────────
-            with divider_col:
+        # ── 구분선 ────────────────────────────────────────────────
+        with div_col:
+            st.markdown(
+                '<div style="border-left:1px solid #e9ecef;height:100%;min-height:300px;"></div>',
+                unsafe_allow_html=True)
+
+        # ── 오른쪽: 중분류 드릴다운 ───────────────────────────────
+        with right_col:
+            if st.session_state.selected_cat:
+                sel_cat  = st.session_state.selected_cat
+                cat_list = list(cat_df.iterrows())
+                sel_i    = next(
+                    (i for i, (_, r) in enumerate(cat_list) if r["대분류"] == sel_cat), 0
+                )
+                sel_color = DRILL_COLORS[sel_i % len(DRILL_COLORS)]
+
+                sub_exp = exp_df[exp_df["대분류"] == sel_cat]
+                mid_df  = (
+                    sub_exp[~sub_exp["중분류"].isin(["미분류", ""])]
+                    .groupby("중분류")["금액"].sum()
+                    .reset_index()
+                    .sort_values("금액", ascending=False)
+                )
+
+                # 소제목
                 st.markdown(
-                    '<div style="border-left:1px solid #e9ecef;height:100%;min-height:300px;"></div>',
+                    f'<div style="font-size:14px;font-weight:700;margin-bottom:8px;'
+                    f'padding-bottom:6px;border-bottom:2px solid {sel_color};">'
+                    f'<span style="color:{sel_color};">●</span>'
+                    f' {sel_cat} 내역</div>',
                     unsafe_allow_html=True)
 
-            # ── 오른쪽: 중분류 ────────────────────────────────────
-            with right_col:
-                if not st.session_state.drill_category:
+                if mid_df.empty:
                     st.markdown(
-                        '<div style="display:flex;align-items:center;justify-content:center;'
-                        'height:200px;color:#ced4da;font-size:14px;">← 대분류를 선택하세요</div>',
+                        '<div style="color:#adb5bd;font-size:13px;padding:12px 0;">중분류 데이터 없음</div>',
                         unsafe_allow_html=True)
                 else:
-                    sel_color_idx = next(
-                        (i for i, (_, r) in enumerate(cat_df.iterrows())
-                         if r["대분류"] == st.session_state.drill_category), 0
-                    )
-                    sel_color = DRILL_COLORS[sel_color_idx % len(DRILL_COLORS)]
+                    max_mid   = mid_df["금액"].max()
+                    total_mid = mid_df["금액"].sum()
+                    for _, mrow in mid_df.iterrows():
+                        mpct   = mrow["금액"] / total_mid * 100
+                        mbar_w = mrow["금액"] / max_mid * 100
 
-                    st.markdown(
-                        f'<div style="font-size:12px;color:#adb5bd;margin-bottom:4px;">'
-                        f'<span style="font-weight:700;color:{sel_color};">'
-                        f'{st.session_state.drill_category}</span> · 중분류</div>',
-                        unsafe_allow_html=True)
-
-                    sub_exp = exp_df[exp_df["대분류"] == st.session_state.drill_category]
-                    mid_df  = (
-                        sub_exp[~sub_exp["중분류"].isin(["미분류", ""])]
-                        .groupby("중분류")["금액"].sum()
-                        .reset_index()
-                        .sort_values("금액", ascending=False)
-                    )
-
-                    if mid_df.empty:
-                        st.markdown('<div style="color:#adb5bd;font-size:13px;padding:8px 0;">중분류 데이터가 없습니다.</div>',
-                                    unsafe_allow_html=True)
-                    else:
-                        total_mid = mid_df["금액"].sum()
-                        max_mid   = mid_df["금액"].max()
-
-                        for j, (_, mrow) in enumerate(mid_df.iterrows()):
-                            mpct   = mrow["금액"] / total_mid * 100
-                            mbar_w = mrow["금액"] / max_mid * 100
-                            mc_dot, mc_name, mc_bar, mc_amt, mc_pct = st.columns([0.3, 2.8, 3.5, 1.8, 0.8])
-                            with mc_dot:
-                                st.markdown(
-                                    f'<div style="width:10px;height:10px;background:{sel_color};'
-                                    f'border-radius:2px;margin-top:9px;"></div>',
-                                    unsafe_allow_html=True)
-                            with mc_name:
-                                st.markdown(
-                                    f'<div style="font-size:13px;font-weight:500;padding-top:6px;">'
-                                    f'{mrow["중분류"]}</div>',
-                                    unsafe_allow_html=True)
-                            with mc_bar:
-                                st.markdown(
-                                    f'<div style="padding-top:7px;">'
-                                    f'<div style="background:#f1f3f5;border-radius:6px;height:16px;width:100%;">'
-                                    f'<div style="background:{sel_color};border-radius:6px;height:16px;'
-                                    f'width:{mbar_w:.1f}%;opacity:0.8;"></div>'
-                                    f'</div></div>',
-                                    unsafe_allow_html=True)
-                            with mc_amt:
-                                st.markdown(
-                                    f'<div style="text-align:right;font-size:13px;font-weight:600;'
-                                    f'padding-top:6px;">₩{int(mrow["금액"]/10000):,}만</div>',
-                                    unsafe_allow_html=True)
-                            with mc_pct:
-                                st.markdown(
-                                    f'<div style="text-align:right;font-size:12px;color:#868e96;'
-                                    f'padding-top:6px;">{mpct:.1f}%</div>',
-                                    unsafe_allow_html=True)
+                        m1, m2, m3 = st.columns([2.5, 5, 2])
+                        with m1:
+                            st.markdown(
+                                f'<div style="font-size:13px;padding-top:5px;color:#212529;">'
+                                f'{mrow["중분류"]}</div>',
+                                unsafe_allow_html=True)
+                        with m2:
+                            st.markdown(
+                                f'<div style="padding-top:7px;">'
+                                f'<div style="background:#f1f3f5;border-radius:6px;height:14px;">'
+                                f'<div style="background:{sel_color};border-radius:6px;height:14px;'
+                                f'width:{mbar_w:.1f}%;opacity:0.8;"></div></div></div>',
+                                unsafe_allow_html=True)
+                        with m3:
+                            st.markdown(
+                                f'<div style="text-align:right;font-size:13px;padding-top:5px;">'
+                                f'₩{int(mrow["금액"]/10000):,}만 '
+                                f'<span style="color:#adb5bd;font-size:11px;">({mpct:.1f}%)</span></div>',
+                                unsafe_allow_html=True)
+            else:
+                # 안내 문구
+                st.markdown(
+                    '<div style="display:flex;align-items:center;justify-content:center;'
+                    'height:240px;flex-direction:column;gap:10px;">'
+                    '<span style="font-size:32px;opacity:0.3;">←</span>'
+                    '<span style="font-size:13px;color:#ced4da;text-align:center;line-height:1.6;">'
+                    '대분류를 클릭하면<br>중분류 내역이 표시됩니다</span>'
+                    '</div>',
+                    unsafe_allow_html=True)
 
         # ── 미분류 섹션 (전체 너비, 카드 하단) ──────────────────────
         if unclassified > 0:
@@ -757,6 +859,9 @@ def show_dashboard():
                     .sort_values("금액", ascending=False)
                     .reset_index(drop=True)
                 )
+                # object 컬럼의 혼합 타입(int/str) → 강제 str 변환
+                for _c in tbl.select_dtypes(include="object").columns:
+                    tbl[_c] = tbl[_c].astype(str)
                 st.dataframe(
                     tbl,
                     use_container_width=True,
