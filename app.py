@@ -225,7 +225,7 @@ def load_data() -> pd.DataFrame:
     sa = dict(st.secrets["service_account"])
     creds  = ServiceCredentials.from_service_account_info(sa, scopes=SHEETS_SCOPES)
     client = gspread.authorize(creds)
-    ws     = client.open_by_key(SPREADSHEET_ID).get_worksheet(0)
+    ws     = client.open_by_key(SPREADSHEET_ID).worksheet("통합장부")
     df     = pd.DataFrame(ws.get_all_records())
 
     # 빈 데이터프레임 처리
