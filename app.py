@@ -228,6 +228,24 @@ def load_data() -> pd.DataFrame:
     ws     = client.open_by_key(SPREADSHEET_ID).get_worksheet(0)
     df     = pd.DataFrame(ws.get_all_records())
 
+    # 빈 데이터프레임 처리
+    if df.empty:
+        return pd.DataFrame(columns=["회계날짜", "금액", "유형", "대분류", "중분류",
+                                     "연도", "월", "연월"])
+
+    # 컬럼명 앞뒤 공백 제거 (스프레드시트 헤더 오염 방어)
+    df.columns = df.columns.str.strip()
+
+    # 필수 컬럼 누락 시 명확한 에러 메시지 제공
+    required = ["회계날짜", "금액", "유형", "대분류"]
+    missing  = [c for c in required if c not in df.columns]
+    if missing:
+        actual = list(df.columns)
+        raise KeyError(
+            f"스프레드시트에 필수 컬럼이 없습니다: {missing}\n"
+            f"실제 컬럼 목록: {actual}"
+        )
+
     # 회계날짜 기준
     df["회계날짜"] = pd.to_datetime(df["회계날짜"], errors="coerce")
     df["금액"]    = pd.to_numeric(df["금액"], errors="coerce").fillna(0)
@@ -235,6 +253,11 @@ def load_data() -> pd.DataFrame:
     df["월"]      = df["회계날짜"].dt.month.astype("Int64")
     df["연월"]    = df["회계날짜"].dt.to_period("M").astype(str)
     df["대분류"]  = df["대분류"].replace("", "미분류")
+
+    # 중분류 컬럼 없으면 빈 값으로 생성
+    if "중분류" not in df.columns:
+        df["중분류"] = ""
+
     return df
 
 
